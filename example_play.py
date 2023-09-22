@@ -56,11 +56,11 @@ class Stockfish(_Stockfish, APIEngine):
         self.name = name
 
     def __str__(self):
-        elo = sf.get_parameters()["UCI_Elo"]
+        elo = self.get_parameters()["UCI_Elo"]
         return super().__str__() + f" elo: {elo}"
 
     def get_elo(self):
-        return sf.get_parameters()["UCI_Elo"]
+        return self.get_parameters()["UCI_Elo"]
 
     # It can be faster to not use this because the games are shorter
     # was faster with 100ms than not
@@ -149,8 +149,12 @@ class OpenAI(APIEngine):
                     prompt=prompt,
                     temperature=min(0.8 + (i / 8), 2),
                     max_tokens=6,  # longest san moves are 6 tokens: dxe8=R#
-                    stop=[".", "1-0", "0-1", "1/2-1/2"],
-                    # stop=[" "], # sometimes space is the first character generated
+                    stop=[
+                        ".",
+                        "1-0",
+                        "0-1",
+                        "1/2",
+                    ],  # sometimes space is the first character generated
                     n=5,  # prompt is 175 tokens, cheaper to get all suggestions at once
                 )
             except Exception as e:
@@ -164,11 +168,42 @@ class OpenAI(APIEngine):
             )  # Dict's perserve order in py>=3.7
             print(f"OA responses: {texts}")
             for text in texts:
-                # print(f"OA response: `{text}`")
-                san_move = text.strip().split(" ")[0].split("\n")[0]
+                san_move = text.strip().split(" ")[0].split("\n")[0].strip()
                 try:
-                    uci_move = self.board.parse_san(san_move).uci()
-                    assert self.board.is_legal(oa.board.parse_uci(uci_move))
+                    try:
+                        uci_move = self.board.parse_san(san_move).uci()
+                    except chess.AmbiguousMoveError as e:
+                        print(f"WARN Ambigious '{san_move}'. Null contest? {e}")
+                        color = chess.WHITE if len(self.uci_moves) % 2 == 0 else chess.BLACK
+                        if len(san_move) == 2:
+                            piece = chess.PAWN
+                        else:
+                            piece = next(
+                                p
+                                for p in [
+                                    chess.PAWN,
+                                    chess.KNIGHT,
+                                    chess.BISHOP,
+                                    chess.ROOK,
+                                    chess.QUEEN,
+                                    chess.KING,
+                                ]
+                                if chess.piece_symbol(p) == san_move[0].lower()
+                            )
+                        squares = [chess.square_name(p) for p in self.board.pieces(piece, color)]
+                        uci_move = next(
+                            (
+                                f"{san_move[1:3]}{end}"
+                                for end in squares
+                                if f"{san_move[1:3]}{end}" in self.board.legal_moves
+                            ),
+                            None,
+                        )
+                        if uci_move is None:
+                            uci_move = next(
+                                m for m in self.board.legal_moves if m.uci()[:2] in squares
+                            )
+                    assert self.board.is_legal(self.board.parse_uci(uci_move))
                     return uci_move
                 except Exception as e:
                     print(f"'{e}', '{text}', '{san_move}'")
@@ -249,12 +284,11 @@ def engines_play(white, black, uci_moves=None):
     t = time.perf_counter()
     illegal_move = None
     for i in range(6000):  # max possible moves is 5.9k
-        if i % 10 == 9:
-            print(board, "\n")
+        # print(board, "\n")
         turn = white if (i % 2) == white_first else black
         turn.set_position(uci_moves)
         m = turn.get_best_move()
-        print(m, i)
+        # print(m, i)
         try:
             board.push_uci(m)
         except Exception as e:
@@ -289,15 +323,16 @@ def engines_play(white, black, uci_moves=None):
     )
 
 
-def make_engines(elo=1200, model="gpt-3.5-turbo-instruct"):
-    sf_elo = elo
+def make_engines(sf_elo=1200, model="gpt-3.5-turbo-instruct"):
     sf = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 512, "UCI_Elo": sf_elo})
     oa = OpenAI(model, model)
+    oa.elo_est = sf_elo
     return (sf, oa)
 
 
-def play_threadsafe(sf, oa):
-    sf_white = True  # bool(random.randint(0, 1))
+def play_threadsafe(elo, model):
+    sf, oa = make_engines(elo, model)  # sf takes <1sec to init, but has locks to executable
+    sf_white = bool(random.randint(0, 1))
     white, black = (sf, oa) if sf_white else (oa, sf)
     try:
         gr = engines_play(white, black)
@@ -314,28 +349,29 @@ def play_threadsafe(sf, oa):
         eval = sf.get_evaluation()
         sf.set_elo_rating(sf_elo)
     r = StoreResults(*gr, white.get_elo(), black.get_elo(), eval)
-    return r
+    return tuple(r)
 
 
 # sf, oa = make_engines()
 # play_threadsafe(sf, oa)
 
+
 # %%
 
 if __name__ == "__main__":
-    oa_elo = 1200
     sf_elo = 1200
+    oa_elo = 1200
+    model = "gpt-3.5-turbo-instruct"
     all_results = []
     now = re.sub("\D+", "_", str(datetime.now()))
-    NUM_CPU = 3
-    NUM_GAMES = NUM_CPU * 1
+    NUM_CPU = 5
+    NUM_GAMES = NUM_CPU * 10
     with open(f"results/results_{now}.csv", "a+", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(StoreResults._fields)
-        # using asyncio to play games at once
-        engines = [make_engines() for _ in range(NUM_CPU)]
-        manager = multiprocessing.Manager()
-        engines = [(manager.Value(Stockfish, sf), oa) for sf, oa in engines]
+        # engines = [make_engines() for _ in range(NUM_CPU)]
+        # manager = multiprocessing.Manager()
+        # engines = [(manager.Value(Stockfish, sf), oa) for sf, oa in engines]
         pool = multiprocessing.Pool(NUM_CPU)
         for _ in range(NUM_GAMES // NUM_CPU):
             # processes = []
@@ -346,10 +382,14 @@ if __name__ == "__main__":
             #    p.start()
             # results = [p.join() for p in processes]
 
-            results = pool.map(play_threadsafe, engines)
+            results = [
+                StoreResults(*r)
+                for r in pool.starmap(play_threadsafe, [(sf_elo, model) for _ in range(NUM_CPU)])
+            ]
             rsum = 0
             for r in results:
                 if r is None:
+                    print("skipped one")
                     continue
                 writer.writerow(r)
                 rsum += r.result
@@ -357,8 +397,8 @@ if __name__ == "__main__":
             sf_elo, oa_elo = new_elos(sf_elo, oa_elo, rsum)
             print(results, sf_elo, oa_elo)
             sf_elo = oa_elo
-            for sf, _ in engines:
-                sf.set_elo_rating(sf_elo)
+            # for sf, _ in engines:
+            #    sf.set_elo_rating(sf_elo)
     print(all_results)
     print([(i.result, i.black_elo, i.eval) for i in all_results])
     # %%
