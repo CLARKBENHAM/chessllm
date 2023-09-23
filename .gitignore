@@ -5,6 +5,8 @@ tokenizer.model
 tokenizer_checklist.chk
 results/*.csv
 !results/results_2023_09_21_21_48_55_335214.csv
+!results/results_2023_09_22_17_47_34_587661.csv
+!results/results_2023_09_22_18_01_40_144335.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

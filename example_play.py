@@ -17,8 +17,7 @@ import re
 import chess
 import openai
 from stockfish import Stockfish as _Stockfish
-
-PATH = "/usr/local/bin/stockfish"
+from constants import STOCKFISH_PATH, WIN_CUTOFF
 
 dotenv.load_dotenv()  # ".env", override=True)
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -52,7 +51,7 @@ class Stockfish(_Stockfish, APIEngine):
     name = None
 
     def __init__(self, name=None, *vargs, **kwargs):
-        _Stockfish.__init__(self, PATH, *vargs, **kwargs)
+        _Stockfish.__init__(self, STOCKFISH_PATH, *vargs, **kwargs)
         self.name = name
 
     def __str__(self):
@@ -177,6 +176,10 @@ class OpenAI(APIEngine):
                         color = chess.WHITE if len(self.uci_moves) % 2 == 0 else chess.BLACK
                         if len(san_move) == 2:
                             piece = chess.PAWN
+                            end = san_move[:2]
+                            if "x" in san_move:
+                                # "exd6 e.p." for en passant capture
+                                end = san_move.replace("x", "")[1:3]
                         else:
                             piece = next(
                                 p
@@ -190,23 +193,28 @@ class OpenAI(APIEngine):
                                 ]
                                 if chess.piece_symbol(p) == san_move[0].lower()
                             )
-                        squares = [chess.square_name(p) for p in self.board.pieces(piece, color)]
+                            end = san_move.replace("x", "")[1:3]
+                        start_squares = [
+                            chess.square_name(p) for p in self.board.pieces(piece, color)
+                        ]
                         uci_move = next(
                             (
-                                f"{san_move[1:3]}{end}"
-                                for end in squares
-                                if f"{san_move[1:3]}{end}" in self.board.legal_moves
+                                f"{start}{end}"
+                                for start in start_squares
+                                if chess.Move.from_uci(f"{start}{end}") in self.board.legal_moves
                             ),
                             None,
                         )
                         if uci_move is None:
                             uci_move = next(
-                                m for m in self.board.legal_moves if m.uci()[:2] in squares
+                                m.uci()
+                                for m in self.board.legal_moves
+                                if m.uci()[:2] in start_squares
                             )
                     assert self.board.is_legal(self.board.parse_uci(uci_move))
                     return uci_move
                 except Exception as e:
-                    print(f"'{e}', '{text}', '{san_move}'")
+                    print(f"{e}, '{text}', '{san_move}'")
                     suggestions += [text]
             i += 1
         return f"No valid suggestions: {'|'.join(suggestions)}"
@@ -216,9 +224,14 @@ def new_elos(elo1, elo2, result, k=24):
     """result in terms of player 1
     k: a factor to determine how much elo changes, higher changes more quickly
     """
-    p = 1.0 * 1.0 / (1 + 1.0 * math.pow(10, 1.0 * (elo1 - elo2) / 400))
-    elo1 += k * (result - p)
-    elo2 += k * (p - result)
+    try:
+        num_matches = len(result)
+        result = sum(result)
+    except:
+        num_matches = 1
+    expected = num_matches / (1 + math.pow(10, (elo1 - elo2) / 400))
+    elo1 += k * (result - expected)
+    elo2 += k * (expected - result)
     return elo1, elo2
 
 
@@ -244,26 +257,8 @@ StoreResults = namedtuple(
         "eval",  # {'type': 'mate', 'value': nmoves_till_mate} or {'type': 'cp', 'value': centipawns_in_whites_favor}
     ],
 )
-# sf_elo = 1200
-# oa_elo = 1200
-# sf = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 512})
-# sf2 = Stockfish("weak_stockfish", parameters={"Threads": 6, "Hash": 128})
-# referee = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 1024, "Skill Level": 20})
-# sf.set_elo_rating(sf_elo)
-# sf2.set_elo_rating(sf_elo // 2)
-# model = "gpt-3.5-turbo-instruct"
-# oa = OpenAI(model, model)
-# print(sf, sf2)
-
-# moves = []
-# for i in range(9):
-#    sf.set_position(moves)
-#    moves += [sf.get_best_move()]
-# oa.set_position(moves)
-# print(oa.get_best_move())
 
 
-# %%
 def engines_play(white, black, uci_moves=None):
     """2 engines play against each other, e1 is white, e2 black
     Args:
@@ -352,6 +347,25 @@ def play_threadsafe(elo, model):
     return tuple(r)
 
 
+# sf_elo = 1200
+# oa_elo = 1200
+# sf = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 512})
+# sf2 = Stockfish("weak_stockfish", parameters={"Threads": 6, "Hash": 128})
+# referee = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 1024, "Skill Level": 20})
+# sf.set_elo_rating(sf_elo)
+# sf2.set_elo_rating(sf_elo // 2)
+# model = "gpt-3.5-turbo-instruct"
+# oa = OpenAI(model, model)
+# print(sf, sf2)
+
+# moves = []
+# for i in range(9):
+#    sf.set_position(moves)
+#    moves += [sf.get_best_move()]
+# oa.set_position(moves)
+# print(oa.get_best_move())
+
+
 # sf, oa = make_engines()
 # play_threadsafe(sf, oa)
 
@@ -365,40 +379,47 @@ if __name__ == "__main__":
     all_results = []
     now = re.sub("\D+", "_", str(datetime.now()))
     NUM_CPU = 5
-    NUM_GAMES = NUM_CPU * 10
-    with open(f"results/results_{now}.csv", "a+", newline="") as file:
+    NUM_GAMES = NUM_CPU * 20
+    result_csv_path = f"results/results_{now}.csv"
+    print(result_csv_path)
+    with open(result_csv_path, "a+", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(StoreResults._fields)
-        # engines = [make_engines() for _ in range(NUM_CPU)]
-        # manager = multiprocessing.Manager()
-        # engines = [(manager.Value(Stockfish, sf), oa) for sf, oa in engines]
         pool = multiprocessing.Pool(NUM_CPU)
         for _ in range(NUM_GAMES // NUM_CPU):
-            # processes = []
-            # for engine in engines:
-            #    p = multiprocessing.Process(play_threadsafe, engine)
-            #    print(p.args)  # print the arguments
-            #    processes.append(p)
-            #    p.start()
-            # results = [p.join() for p in processes]
-
             results = [
                 StoreResults(*r)
                 for r in pool.starmap(play_threadsafe, [(sf_elo, model) for _ in range(NUM_CPU)])
             ]
-            rsum = 0
+            rs = []
             for r in results:
                 if r is None:
-                    print("skipped one")
+                    print("game failed due to exception")
                     continue
+                else:
+                    all_results += [r]
                 writer.writerow(r)
-                rsum += r.result
-            all_results += [*results]
-            sf_elo, oa_elo = new_elos(sf_elo, oa_elo, rsum)
-            print(results, sf_elo, oa_elo)
+                if r.eval is None:
+                    white_win = r.result
+                elif r.eval["type"] == "mate":
+                    white_win = int(
+                        r.eval["value"] > 0 or (r.eval["value"] == 0 and len(r.moves) % 2 == 1)
+                    )
+                else:
+                    if r.eval["value"] >= WIN_CUTOFF:
+                        white_win = 1
+                    elif r.eval["value"] <= -WIN_CUTOFF:
+                        white_win = 0
+                    else:
+                        white_win = 0.5
+                is_gpt = r.white != "stockfish"
+                rs += [white_win if is_gpt else 1 - white_win]
+            print([(i.white, i.result, i.eval) for i in results], rs)
+            # oa_elo, sf_elo = new_elos(oa_elo, sf_elo, rs, k=50)
+            print(results, "\n", rs, oa_elo, sf_elo)
+            oa_elo += 50
             sf_elo = oa_elo
-            # for sf, _ in engines:
-            #    sf.set_elo_rating(sf_elo)
     print(all_results)
     print([(i.result, i.black_elo, i.eval) for i in all_results])
-    # %%
+    print("\n\nwrote: ", result_csv_path)
+# %%
