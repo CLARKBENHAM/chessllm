@@ -27,29 +27,7 @@ def try_ast_eval(s):
 CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"  # no trend
 # CSV_PATH = "results/results_2023_09_22_18_01_40_144335.csv"
 
-df = pd.read_csv(
-    CSV_PATH,
-    converters={"moves": ast.literal_eval, "eval": try_ast_eval},
-    # errors="coherce",
-)
 
-# evals is NA if no illegal move made
-assert (df["illegal_move"].isna() == df["eval"].isna()).all()
-
-df["eval_type"] = df["eval"].apply(lambda e: e["type"] if isinstance(e, dict) else pd.NA)
-df["eval_value"] = (
-    df["eval"].apply(lambda e: e["value"] if isinstance(e, dict) else pd.NA).astype("Int64")
-)
-df["ply"] = df["moves"].apply(len)
-
-
-# Set positive numbers are better for gpt
-df["eval_value"].loc[df["white"] == "stockfish"] *= -1
-# df["result"].loc[df["white"] == "stockfish"] = 1 - df["result"].loc[df["white"] == "stockfish"]
-df.loc[df["white"] == "stockfish", "result"] = 1 - df["result"].loc[df["white"] == "stockfish"]
-
-
-# %%
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):
     """A numerical representation of the games result, according to stockfish's eval.
     positive is in favor of gpt, negative is in favor of stockfish
@@ -92,17 +70,21 @@ def gpt_win_prob(gpt_cp_result=None, ply=None, **kwargs):
         ```
         With a skill level of 20 it was np.unique([i.result for i in results3], return_counts=True)==(array([0.5, 1. ]), array([122, 287]))
         Which should be a prob of (287+0.5*122)/(122+287) = 85% with elo advancement, or 70% outright win
-    Stockfish returns it's value divided by UCI::NormalizeToPawnValue (328) to convert to centi-pawns
-    https://github.com/official-stockfish/Stockfish/blob/22cdb6c1ea1f5ca429333bcbe26706c8b4dd38d7/src/search.cpp#L1905C1-L1906C1
+    Stockfish returns it's value * 100 / UCI::NormalizeToPawnValue (328) to convert to centi-pawns
     https://github.com/official-stockfish/Stockfish/blob/22cdb6c1ea1f5ca429333bcbe26706c8b4dd38d7/src/uci.cpp#L315
     But the win_rate_model is based on the original value: https://github.com/official-stockfish/Stockfish/blob/70ba9de85cddc5460b1ec53e0a99bee271e26ece/src/uci.cpp#L209
+    And https://github.com/official-stockfish/WDL_model/blob/6977d86df30e3529875c471336abe723afb018c9/scoreWDL.py#L53C11-L53C11
+        says cp to value is v * NormalizeToPawnValue / 100
 
-    gpt_cp_result: the evaluation of the board in centipawns, in favor of GPT
+    gpt_cp_result: the evaluation of the board in *centipawns*, in favor of GPT.
+        The docs say a "value" of +1 is 50% chance of winning, but convert to centipawns when printing the evaluation
+        https://github.com/official-stockfish/Stockfish/blob/22cdb6c1ea1f5ca429333bcbe26706c8b4dd38d7/src/search.cpp#L1905C1-L1906C1
     ply is number of total moves
     returns win probability : 1- lose probability - draw probability.
         win and lose probability can both be 0
     """
-    value = gpt_cp_result * NormalizeToPawnValue / 100
+
+    value = gpt_cp_result * 100 / NormalizeToPawnValue
     # The model only captures up to 240 plies, so limit the input and then rescale
     m = min(240, ply) / 64.0
 
@@ -138,53 +120,78 @@ def draw_prob(gpt_cp_result, ply, **kwargs):
     return 1 - w_p - l_p
 
 
-df["gpt_cp_result"] = df.apply(lambda row: decide_game(**row), axis=1)
-# gpt_win_prob is in terms of white, but gpt_cp_result already converted to be in terms of GPT
-df["gpt_win_prob"] = df.apply(lambda row: gpt_win_prob(**row), axis=1)
-df["draw_prob"] = df.apply(lambda row: draw_prob(**row), axis=1)
+def init_df(path):
+    df = pd.read_csv(
+        CSV_PATH,
+        converters={"moves": ast.literal_eval, "eval": try_ast_eval},
+        # errors="coherce",
+    )
+
+    # evals is NA if no illegal move made
+    assert (df["illegal_move"].isna() == df["eval"].isna()).all()
+
+    df["eval_type"] = df["eval"].apply(lambda e: e["type"] if isinstance(e, dict) else pd.NA)
+    df["eval_value"] = (
+        df["eval"].apply(lambda e: e["value"] if isinstance(e, dict) else pd.NA).astype("Int64")
+    )
+    df["ply"] = df["moves"].apply(len)
+
+    # Set positive numbers are better for gpt
+    df["eval_value"].loc[df["white"] == "stockfish"] *= -1
+    # df["result"].loc[df["white"] == "stockfish"] = 1 - df["result"].loc[df["white"] == "stockfish"]
+    df.loc[df["white"] == "stockfish", "result"] = 1 - df["result"].loc[df["white"] == "stockfish"]
+
+    df["gpt_cp_result"] = df.apply(lambda row: decide_game(**row), axis=1)
+    # gpt_win_prob is in terms of white, but gpt_cp_result already converted to be in terms of GPT
+    df["gpt_win_prob"] = df.apply(lambda row: gpt_win_prob(**row), axis=1)
+    df["draw_prob"] = df.apply(lambda row: draw_prob(**row), axis=1)
+
+    assert (
+        df[df["result"] == 1].apply(
+            lambda r: r["gpt_win_prob"] == 1 and r["gpt_cp_result"] == WIN_CP, axis=1
+        )
+    ).all()
+    assert (
+        df.query("result==0 and illegal_move.isna()").apply(
+            lambda r: r["gpt_win_prob"] == 0 and r["gpt_cp_result"] == -WIN_CP, axis=1
+        )
+    ).all()
+    assert (
+        df.query('eval_type=="mate"')
+        .apply(
+            lambda r: (r["gpt_cp_result"] == WIN_CP and r["gpt_win_prob"] == 1)
+            or (r["gpt_cp_result"] == -WIN_CP and r["gpt_win_prob"] == 0),
+            axis=1,
+        )
+        .all()
+    )
+    ## Fails because with a very good stockfish, even a slight edge is a win, but I require 300 pawns worth of advantage
+    # assert df.query("gpt_win_prob>0.99").apply(
+    #        lambda r: (~r.isna()["illegal_move"] and r["gpt_cp_result"] >= WIN_CUTOFF)
+    #        or r["result"] == 1,
+    #        axis=1,
+    # ).mean() > 0.9, "often GPT is predicted to win but determined GPT didn't/would not have won"
+    assert (
+        df.query("gpt_win_prob<0.01 and draw_prob < 0.01").apply(
+            lambda r: r["result"] == 0
+            or (r["gpt_cp_result"] <= -WIN_CUTOFF and ~r.isna()["illegal_move"]),
+            axis=1,
+        )
+    ).all()
+
+    _win_p = lambda cutoff: np.mean(
+        [gpt_win_prob(gpt_cp_result=cutoff, ply=i) for i in np.arange(30, 100)]
+    )
+    if abs(_win_p(WIN_CUTOFF) - 0.5) >= 0.05:
+        best_cutoff = min(np.arange(1, 400, 1), key=lambda c: abs(_win_p(c) - 0.5))
+        print(f"picked a bad WIN_CUTOFF, for a cutoff with 50% chance of winning use {best_cutoff}")
+
+    return df
+
+
+df = init_df(CSV_PATH)
 
 # df[df["result"] == 1][["gpt_win_prob", "gpt_cp_result"]]
-assert (
-    df[df["result"] == 1].apply(
-        lambda r: r["gpt_win_prob"] == 1 and r["gpt_cp_result"] == WIN_CP, axis=1
-    )
-).all()
-assert (
-    df.query("result==0 and illegal_move.isna()").apply(
-        lambda r: r["gpt_win_prob"] == 0 and r["gpt_cp_result"] == -WIN_CP, axis=1
-    )
-).all()
-assert (
-    df.query('eval_type=="mate"')
-    .apply(
-        lambda r: (r["gpt_cp_result"] == WIN_CP and r["gpt_win_prob"] == 1)
-        or (r["gpt_cp_result"] == -WIN_CP and r["gpt_win_prob"] == 0),
-        axis=1,
-    )
-    .all()
-)
-# Fails because with a very good stockfish, even a slight edge is a win
-assert (
-    df.query("gpt_win_prob>0.99").apply(
-        lambda r: r["gpt_cp_result"] >= WIN_CUTOFF
-        and (~r.isna()["illegal_move"] or r["result"] == 1),
-        axis=1,
-    )
-).all()
-assert (
-    df.query("gpt_win_prob<0.01 and draw_prob < 0.01").apply(
-        lambda r: r["result"] == 0 and r["gpt_cp_result"] <= -WIN_CUTOFF, axis=1
-    )
-).all()
-
-_win_p = lambda cutoff: np.mean(
-    [gpt_win_prob(gpt_cp_result=cutoff, ply=i) for i in np.arange(30, 100)]
-)
-
-if abs(_win_p(WIN_CUTOFF) - 0.5) >= 0.05:
-    best_cutoff = min(np.arange(1, 400, 1), key=lambda c: abs(_win_p(c) - 0.5))
-    print(f"picked a bad WIN_CUTOFF, for a cutoff with 50% chance of winning use {best_cutoff}")
-# %%
 # %%
 WIN_CUTOFF = 900
 # I think function is using the interval version, and returning the value not normalized by pawns?
