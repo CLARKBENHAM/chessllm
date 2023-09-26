@@ -89,7 +89,7 @@ class OpenAI(APIEngine):
 
     def set_position(self, uci_moves):
         # Sticking with UCI moves for now, but prompt uses SAN
-        self.uci_moves = uci_moves
+        self.uci_moves = [*uci_moves]
         san_moves = []
         self.board.reset()
         for m in uci_moves:
@@ -271,6 +271,8 @@ def engines_play(white, black, uci_moves=None):
 
     if uci_moves is None:
         uci_moves = []
+    else:
+        uci_moves = [*uci_moves]
     for m in uci_moves:
         board.push_uci(m)
     white_first = len(uci_moves) % 2
@@ -368,7 +370,6 @@ def play_threadsafe(elo, model):
 
 # sf, oa = make_engines()
 # play_threadsafe(sf, oa)
-
 
 # %%
 

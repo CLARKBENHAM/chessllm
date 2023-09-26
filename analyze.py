@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
 import warnings
 from itertools import zip_longest
+import math
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 import pandas as pd
@@ -12,7 +13,7 @@ import seaborn as sns
 
 from stockfish import Stockfish
 import ast
-from constants import STOCKFISH_PATH, WIN_CUTOFF, WIN_CP
+from constants import STOCKFISH_PATH, WIN_CUTOFF, WIN_CP, NormalizeToPawnValue
 
 
 def try_ast_eval(s):
@@ -23,9 +24,8 @@ def try_ast_eval(s):
 
 
 # trend towards AI playing better against better models
-CSV_PATH = "results/results_2023_09_22_13_39_17_831054.csv"
-CSV_PATH = "results/results_2023_09_22_15_47_34_587661.csv"  # no trend
-CSV_PATH = "results/results_2023_09_22_17_01_40_144335.csv"
+CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"  # no trend
+# CSV_PATH = "results/results_2023_09_22_18_01_40_144335.csv"
 
 df = pd.read_csv(
     CSV_PATH,
@@ -40,6 +40,7 @@ df["eval_type"] = df["eval"].apply(lambda e: e["type"] if isinstance(e, dict) el
 df["eval_value"] = (
     df["eval"].apply(lambda e: e["value"] if isinstance(e, dict) else pd.NA).astype("Int64")
 )
+df["ply"] = df["moves"].apply(len)
 
 
 # Set positive numbers are better for gpt
@@ -54,11 +55,12 @@ def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=
     positive is in favor of gpt, negative is in favor of stockfish
     """
     if pd.isna(eval_type):
-        val = result
-        if val > 0.5:
+        if result > 0.5:
             val = WIN_CP
-        elif val < 0.5:
+        elif result < 0.5:
             val = -WIN_CP
+        else:
+            val = 0
     elif eval_type == "mate":
         if eval_value == 0:  # mate is 0 for both win and lose
             white_won = len(moves) % 2 == 1
@@ -72,7 +74,154 @@ def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=
     return val
 
 
+def gpt_win_prob(gpt_cp_result=None, ply=None, **kwargs):
+    """
+    Gets the probability the most powerful stockfish version would win, given an evaluation.
+        This will be incorrect for low level play:  says '3rr3/1p3pk1/pqb1pn1p/6p1/7P/1NPB1QR1/P1P2PP1/4R1K1 w - - 3 24'
+        a 201cp lead is a 99.7% win chance but in the experiment it wins 4/9 at elo=1200 and 3/9 at elo=1500
+        ```
+        >>>uci_moves = df.query("gpt_win_prob>0.99 and gpt_cp_result < 300").iloc[0]["moves"]
+        >>>sf, _ = make_engines()
+        >>>sf2, _ = make_engines()
+        >>>sf.set_position(uci_moves)
+        >>>sf2.set_position(uci_moves)
+        >>>results = [engines_play(sf, sf2, [*uci_moves]) for _ in range(9)]
+        >>>[i.result for i in results]
+        [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0]
+        # 4 wins, 5 losses
+        ```
+        With a skill level of 20 it was np.unique([i.result for i in results3], return_counts=True)==(array([0.5, 1. ]), array([122, 287]))
+        Which should be a prob of (287+0.5*122)/(122+287) = 85% with elo advancement, or 70% outright win
+    Stockfish returns it's value divided by UCI::NormalizeToPawnValue (328) to convert to centi-pawns
+    https://github.com/official-stockfish/Stockfish/blob/22cdb6c1ea1f5ca429333bcbe26706c8b4dd38d7/src/search.cpp#L1905C1-L1906C1
+    https://github.com/official-stockfish/Stockfish/blob/22cdb6c1ea1f5ca429333bcbe26706c8b4dd38d7/src/uci.cpp#L315
+    But the win_rate_model is based on the original value: https://github.com/official-stockfish/Stockfish/blob/70ba9de85cddc5460b1ec53e0a99bee271e26ece/src/uci.cpp#L209
+
+    gpt_cp_result: the evaluation of the board in centipawns, in favor of GPT
+    ply is number of total moves
+    returns win probability : 1- lose probability - draw probability.
+        win and lose probability can both be 0
+    """
+    value = gpt_cp_result * NormalizeToPawnValue / 100
+    # The model only captures up to 240 plies, so limit the input and then rescale
+    m = min(240, ply) / 64.0
+
+    # The coefficients of a third-order polynomial fit is based on the fishtest data
+    # for two parameters that need to transform eval to the argument of a logistic
+    # function.
+    as_ = [0.38036525, -2.82015070, 23.17882135, 307.36768407]
+    bs_ = [-2.29434733, 13.27689788, -14.26828904, 63.45318330]
+
+    # Enforce that NormalizeToPawnValue corresponds to a 50% win rate at ply 64
+    assert NormalizeToPawnValue == int(
+        as_[0] + as_[1] + as_[2] + as_[3]
+    ), f"{NormalizeToPawnValue} == {int(as_[0] + as_[1] + as_[2] + as_[3])}"
+
+    a = (((as_[0] * m + as_[1]) * m + as_[2]) * m) + as_[3]
+    b = (((bs_[0] * m + bs_[1]) * m + bs_[2]) * m) + bs_[3]
+
+    # Transform the eval to centipawns with limited range
+    x = max(-4000.0, min(4000.0, float(value)))
+
+    # Return the win rate in per mille units rounded to the nearest value
+    mp = int(0.5 + 1000 / (1 + math.exp((a - x) / b)))
+    return mp / 1000.0
+
+
+def gpt_lose_prob(gpt_cp_result=None, ply=None, **kwargs):
+    return gpt_win_prob(-gpt_cp_result, ply)
+
+
+def draw_prob(gpt_cp_result, ply, **kwargs):
+    w_p = gpt_win_prob(gpt_cp_result, ply)
+    l_p = gpt_lose_prob(gpt_cp_result, ply)
+    return 1 - w_p - l_p
+
+
 df["gpt_cp_result"] = df.apply(lambda row: decide_game(**row), axis=1)
+# gpt_win_prob is in terms of white, but gpt_cp_result already converted to be in terms of GPT
+df["gpt_win_prob"] = df.apply(lambda row: gpt_win_prob(**row), axis=1)
+df["draw_prob"] = df.apply(lambda row: draw_prob(**row), axis=1)
+
+# df[df["result"] == 1][["gpt_win_prob", "gpt_cp_result"]]
+assert (
+    df[df["result"] == 1].apply(
+        lambda r: r["gpt_win_prob"] == 1 and r["gpt_cp_result"] == WIN_CP, axis=1
+    )
+).all()
+assert (
+    df.query("result==0 and illegal_move.isna()").apply(
+        lambda r: r["gpt_win_prob"] == 0 and r["gpt_cp_result"] == -WIN_CP, axis=1
+    )
+).all()
+assert (
+    df.query('eval_type=="mate"')
+    .apply(
+        lambda r: (r["gpt_cp_result"] == WIN_CP and r["gpt_win_prob"] == 1)
+        or (r["gpt_cp_result"] == -WIN_CP and r["gpt_win_prob"] == 0),
+        axis=1,
+    )
+    .all()
+)
+# Fails because with a very good stockfish, even a slight edge is a win
+assert (
+    df.query("gpt_win_prob>0.99").apply(
+        lambda r: r["gpt_cp_result"] >= WIN_CUTOFF
+        and (~r.isna()["illegal_move"] or r["result"] == 1),
+        axis=1,
+    )
+).all()
+assert (
+    df.query("gpt_win_prob<0.01 and draw_prob < 0.01").apply(
+        lambda r: r["result"] == 0 and r["gpt_cp_result"] <= -WIN_CUTOFF, axis=1
+    )
+).all()
+
+_win_p = lambda cutoff: np.mean(
+    [gpt_win_prob(gpt_cp_result=cutoff, ply=i) for i in np.arange(30, 100)]
+)
+
+if abs(_win_p(WIN_CUTOFF) - 0.5) >= 0.05:
+    best_cutoff = min(np.arange(1, 400, 1), key=lambda c: abs(_win_p(c) - 0.5))
+    print(f"picked a bad WIN_CUTOFF, for a cutoff with 50% chance of winning use {best_cutoff}")
+# %%
+# %%
+WIN_CUTOFF = 900
+# I think function is using the interval version, and returning the value not normalized by pawns?
+# WIN_CUTOFF=328 works as expected, =100 does not give +50% win chance
+
+
+def f(r):
+    if r >= WIN_CUTOFF:
+        return "win"
+    elif r <= -WIN_CUTOFF:
+        return "loss"
+    else:
+        return "draw"
+
+
+print(df.groupby(df.apply(lambda r: f(r["gpt_cp_result"]), axis=1))["gpt_win_prob"].mean())
+print(df.groupby(df.apply(lambda r: f(r["gpt_cp_result"]), axis=1))["draw_prob"].mean())
+
+plt.plot(
+    np.arange(240),
+    [gpt_win_prob(gpt_cp_result=WIN_CUTOFF, ply=i) * 1000 for i in np.arange(240)],
+    label="win",
+)
+plt.plot(
+    np.arange(240),
+    [draw_prob(gpt_cp_result=WIN_CUTOFF, ply=i) * 1000 for i in np.arange(240)],
+    label="draw",
+)
+plt.plot(
+    np.arange(240),
+    [gpt_lose_prob(gpt_cp_result=WIN_CUTOFF, ply=i) * 1000 for i in np.arange(240)],
+    label="lose",
+)
+plt.legend()
+plt.ylim([0, 1000])
+plt.xlim(0, 240)
+# %%
 
 illegal_p = df["illegal_move"].notna().mean()
 win_p = (
@@ -108,7 +257,7 @@ assert (
     and loss_p == (df["gpt_cp_result"] <= -WIN_CUTOFF).mean()
     and draw_p == (df["gpt_cp_result"].abs() < WIN_CUTOFF).mean()
 )
-plt.title("Number of Forced mates after invalid moves for GPT")
+plt.title("Number of Forced mates for GPT after game ended by invalid move")
 plt.hist(
     df[df["eval_type"] == "mate"].apply(
         lambda i: -i["eval_value"] if i["white"] == "stockfish" else i["eval_value"], axis=1
@@ -148,7 +297,7 @@ fig.subplots_adjust(hspace=0.5)
 fig.show()
 # %%  plot length of game versus elo
 x = df["white_elo"].values
-y = df["moves"].apply(len).values
+y = df["ply"].values
 sns.regplot(x=x, y=y, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
 plt.title("Length of game versus Stockfish Elo")
 plt.xlabel("Elo")
@@ -163,15 +312,27 @@ plt.text(
     transform=plt.gca().transAxes,
 )
 plt.show()
+# %% Plot Win Probability vs elo
+x = df["white_elo"].values
+y = df["gpt_cp_result"].values
+sns.regplot(x=x, y=y, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
+plt.title("Win probability vs Stockfish Elo")
+plt.xlabel("Elo")
+plt.ylabel("Win probability")
+corr, p = stats.pearsonr(x, y)
+plt.text(
+    0.05,
+    0.95,
+    f"corr: {corr:.2f} p: {p:.2f}",
+    horizontalalignment="left",
+    verticalalignment="top",
+    transform=plt.gca().transAxes,
+)
+plt.show()
+
 # %%
 # graph probablity that gpt wins vs elo of gpt.
 # How to convert evaluation to probability of winning?
-
-
-def stockfish_win_prob(eval):
-    """
-    implementation of https://github.com/official-stockfish/Stockfish/blob/70ba9de85cddc5460b1ec53e0a99bee271e26ece/src/uci.cpp#L209
-    """
 
 
 # %% For each entry in the df parse the moves column, a list of moves and return the stockfish evaluation of the board for that move. The result should be a series of lists
