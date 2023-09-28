@@ -1,7 +1,9 @@
 # %%
+import sys
+
 from collections import defaultdict
 import json
-from example_play import engines_play, make_engine
+from example_play import engines_play, make_engines
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
@@ -23,9 +25,9 @@ from analyze import init_df
 CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"
 df = init_df(CSV_PATH)
 
-sf, _ = make_engine()
-sf2, _ = make_engine()
-
+sf, _ = make_engines()
+sf2, _ = make_engines()
+# %%
 result_optimal = defaultdict(list)
 q = df.query("result!=1 and not illegal_move.isna() and eval_type=='cp'")
 x1_prob = []
@@ -115,33 +117,37 @@ for ix, row in q.iterrows():
     data = [engines_play(sf, sf2, [*row["moves"]]) for _ in range(30)]
     print(data)
     results1500[row["fen"]] += data
-    print(row["gpt_win_prob"], np.sum([i.result for i in results1500]))
+    print(
+        row["gpt_win_prob"],
+        np.mean([i.result == (1 if "gpt" in row["white"] else 0) for i in data]),
+    )
+
     x2_prob += [row["gpt_win_prob"]]
     x2_cp += [row["gpt_cp_result"]]
-    y2 += [np.mean([i.result for i in results1500])]
+    y2 += [np.mean([i.result == (1 if "gpt" in row["white"] else 0) for i in data])]
 
 # Test if centi-pawn  is accurate
 with open("elo_1500_play.txt", "w") as file:
-    file.write(json.dumps(result_optimal))
+    file.write(json.dumps(results1500))
 
-win_p1 = [
+win_p2 = [
     np.mean(
         [
             i.result == 1 if row["white"] != "stockfish" else i.result == 0
-            for i in result_optimal[row["fen"]]
+            for i in results1500[row["fen"]]
         ]
     )
     for ix, row in q.iterrows()
-    if row["fen"] in result_optimal
+    if row["fen"] in results1500
 ]
 
 sns.regplot(
-    x=x2_prob, y=win_p1, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2}
+    x=x2_prob, y=win_p2, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2}
 )
 plt.title("Is win prob accurate for 1500 elo?")
 plt.xlabel("gpt win prob")
 plt.ylabel("Avg Result")
-corr, p = stats.pearsonr(x1_prob, y1)
+corr, p = stats.pearsonr(x2_prob, win_p2)
 plt.text(
     0.05,
     0.95,
@@ -151,11 +157,11 @@ plt.text(
     transform=plt.gca().transAxes,
 )
 plt.show()
-sns.regplot(x=x2_cp, y=win_p1, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
+sns.regplot(x=x2_cp, y=win_p2, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
 plt.title("Are Centi-pawns accurate for 1500 elo?")
 plt.xlabel("gpt win centi-pawn")
 plt.ylabel("Avg Result")
-corr, p = stats.pearsonr(x1_prob, y1)
+corr, p = stats.pearsonr(x2_cp, win_p2)
 plt.text(
     0.05,
     0.95,

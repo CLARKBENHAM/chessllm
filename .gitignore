@@ -7,6 +7,8 @@ results/*.csv
 !results/results_2023_09_21_21_48_55_335214.csv
 !results/results_2023_09_22_17_47_34_587661.csv
 !results/results_2023_09_22_18_01_40_144335.csv
+!results/elo_1500_play.txt
+!results/best_play.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -77,6 +79,7 @@ instance/
 
 # Scrapy stuff:
 .scrapy
+.DS_Store
 
 # Sphinx documentation
 docs/_build/
