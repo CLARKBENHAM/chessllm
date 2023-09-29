@@ -238,6 +238,25 @@ class OpenAI(APIEngine):
         return f"No valid suggestions: {'|'.join(suggestions)}"
 
 
+class Manual(OpenAI):
+    def __str__(self):
+        return super().__str__() + f" Human Playing named {self.name}"
+
+    def get_best_move(self):
+        print(self.board)
+        print("Enter move: ")
+        while True:
+            try:
+                m = input()
+                if m == "q":
+                    return None
+                self.board.push_san(m)
+                return self.board.peek().uci()
+            except Exception as e:
+                print(e)
+                print("Enter move: ")
+
+
 def new_elos(elo1, elo2, result, k=24):
     """result in terms of player 1
     k: a factor to determine how much elo changes, higher changes more quickly
@@ -393,14 +412,16 @@ def play_threadsafe(elo, model):
 
 
 sf, oa = make_engines()
-print(play(sf, oa))
-print(oa._make_prompt())
+m = Manual("human", "human")
+play(sf, m)
+# print(play(sf, oa))
+# print(oa._make_prompt())
 
 # %%
 
 if __name__ == "__main__":
-    sf_elo = 1200
-    oa_elo = 1200
+    sf_elo = 1600
+    oa_elo = 1600
     model = "gpt-3.5-turbo-instruct"
     all_results = []
     now = re.sub("\D+", "_", str(datetime.now()))

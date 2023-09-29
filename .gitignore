@@ -9,6 +9,7 @@ results/*.csv
 !results/results_2023_09_22_18_01_40_144335.csv
 !results/elo_1500_play.txt
 !results/best_play.txt
+!results/results_2023_09_29_12_02_42_877101.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
