@@ -19,7 +19,7 @@ import openai
 from stockfish import Stockfish as _Stockfish
 from constants import STOCKFISH_PATH, WIN_CUTOFF
 
-dotenv.load_dotenv()  # ".env", override=True)
+dotenv.load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
@@ -122,9 +122,27 @@ class OpenAI(APIEngine):
             ' Praggnanandhaa"]\n[Black "Magnus Carlsen"]\n[ECO "C48"]\n[WhiteElo "2690"]\n[BlackElo'
             ' "2835"]\n[PlyCount "60"]\n\n'
         )
-        prompt += " ".join(
+        prompt = """[Event ""FIDE World Championship Match 2024""]
+[Site ""Los Angeles, USA""]
+[Date ""2024.12.01""]
+[Round ""5""]
+[White ""Carlsen, Magnus""]
+[Black ""Nepomniachtchi, Ian""]
+[Result ""1-0""]
+[WhiteElo ""2885""]
+[White Title ""GM""]
+[WhiteFideId ""1503014""]
+[BlackElo ""2812""]
+[BlackTitle ""GM""]
+[BlackFideId""4168119""]
+[TimeControl40/7200:20/3600:900+30""]
+[UTCDate ""2024.11.27""]
+[UTCTime ""09:01:25""]
+[Variant ""Standard""]\n"""
+
+        prompt += "\n".join(
             [
-                f"{i+1}.{wm} {bm}"
+                f"{i+1}. {wm} {bm}"
                 for i, (wm, bm) in enumerate(
                     itertools.zip_longest(self.san_moves[0::2], self.san_moves[1::2], fillvalue="")
                 )
@@ -132,7 +150,7 @@ class OpenAI(APIEngine):
         )
 
         if len(self.san_moves) % 2 == 0:
-            prompt += f" {len(self.san_moves)//2+1}. " if len(self.san_moves) > 0 else "1. "
+            prompt += f"\n{len(self.san_moves)//2+1}. " if len(self.san_moves) > 0 else "1. "
         return prompt
 
     def get_best_move(self):
@@ -165,7 +183,7 @@ class OpenAI(APIEngine):
             texts = list(
                 set(dict.fromkeys(map(itemgetter("text"), response.choices)))
             )  # Dict's perserve order in py>=3.7
-            print(f"OA responses: {texts}")
+            # print(f"OA responses: {texts}")
             for text in texts:
                 san_move = text.strip().split(" ")[0].split("\n")[0].strip()
                 try:
@@ -297,6 +315,7 @@ def engines_play(white, black, uci_moves=None):
             break
         uci_moves += [m]
 
+        # result depends whose turn it is
         if board.outcome() is not None:
             result = board.outcome().result().split("-")[0]
             if result == "1/2":
@@ -327,8 +346,7 @@ def make_engines(sf_elo=1200, model="gpt-3.5-turbo-instruct"):
     return (sf, oa)
 
 
-def play_threadsafe(elo, model):
-    sf, oa = make_engines(elo, model)  # sf takes <1sec to init, but has locks to executable
+def play(sf, oa):
     sf_white = bool(random.randint(0, 1))
     white, black = (sf, oa) if sf_white else (oa, sf)
     try:
@@ -347,6 +365,12 @@ def play_threadsafe(elo, model):
         sf.set_elo_rating(sf_elo)
     r = StoreResults(*gr, white.get_elo(), black.get_elo(), eval)
     return tuple(r)
+
+
+def play_threadsafe(elo, model):
+    # sf takes <1sec to init, but has locks to executable
+    sf, oa = make_engines(elo, model)
+    return play(sf, oa)
 
 
 # sf_elo = 1200
@@ -368,8 +392,9 @@ def play_threadsafe(elo, model):
 # print(oa.get_best_move())
 
 
-# sf, oa = make_engines()
-# play_threadsafe(sf, oa)
+sf, oa = make_engines()
+print(play(sf, oa))
+print(oa._make_prompt())
 
 # %%
 

@@ -1732,8 +1732,12 @@ assert len(gpt_white) == len(pred_gpt_win_prob) and len(pred_gpt_win_prob) == le
 #    ]
 # )
 
-#pred_gpt_win_prob = [gpt_win_prob(cp, plies) for cp, plies in zip(pred_gpt_cp, initial_n_plies)]
-pred_gpt_win_prob = [gpt_win_prob(cp, plies) for cp, plies in zip(pred_gpt_cp, initial_n_plies) if gpt_win_prob(cp, plies) > 0 and gpt_win_prob(cp, plies) < 1]
+# pred_gpt_win_prob = [gpt_win_prob(cp, plies) for cp, plies in zip(pred_gpt_cp, initial_n_plies)]
+pred_gpt_win_prob = [
+    gpt_win_prob(cp, plies)
+    for cp, plies in zip(pred_gpt_cp, initial_n_plies)
+    if gpt_win_prob(cp, plies) > 0 and gpt_win_prob(cp, plies) < 1
+]
 
 
 x1_cp = pred_gpt_cp
@@ -1789,3 +1793,11 @@ _plot(
     "1 minus gpt pred win prob ",
     "Log real win rate",
 )
+# %%
+sf, _ = make_engines()
+sf2, _ = make_engines()
+fools_mate = ["f2f3", "e7e6", "g2g4", "d8h4"]
+scholars_mate = ["e2e4", "e7e5", "d1h5", "e8e7", "h5e5"]
+# assert engines_play(sf, sf2, ["a2a3", "a7a6"] + fools_mate[:-1]).result == 0
+assert engines_play(sf, sf2, ["a2a3", "a7a6"] + fools_mate).result == 0
+assert engines_play(sf, sf2, scholars_mate).result == 1

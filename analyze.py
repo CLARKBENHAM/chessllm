@@ -28,9 +28,35 @@ CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"  # no trend
 # CSV_PATH = "results/results_2023_09_22_18_01_40_144335.csv"
 
 
+def reg_plot(
+    x1,
+    y1,
+    xlabel,
+    ylabel,
+    title=None,
+):
+    if title is None:
+        title = f"{ylabel} vs {xlabel}"
+
+    sns.regplot(x=x1, y=y1, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xlabel(xlabel)
+    corr, p = stats.pearsonr(x1, y1)
+    plt.text(
+        0.05,
+        0.95,
+        f"corr: {corr:.2f} p: {p:.2f}",
+        horizontalalignment="left",
+        verticalalignment="top",
+        transform=plt.gca().transAxes,
+    )
+    plt.show()
+
+
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):
     """A numerical representation of the games result, according to stockfish's eval.
-    positive is in favor of gpt, negative is in favor of stockfish
+    positive is in favor of white, negative is in favor of black
     """
     if pd.isna(eval_type):
         if result > 0.5:
@@ -46,9 +72,8 @@ def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=
         else:
             val = WIN_CP if eval_value > 0 else -WIN_CP
     else:
+        assert eval_type == "cp"
         val = eval_value
-    is_gpt = white != "Stockfish"
-    val = val if is_gpt else -val
     return val
 
 
@@ -84,7 +109,7 @@ def gpt_win_prob(gpt_cp_result=None, ply=None, **kwargs):
         win and lose probability can both be 0
     """
 
-    value = gpt_cp_result  * 100 / NormalizeToPawnValue
+    value = gpt_cp_result * NormalizeToPawnValue / 100
     # The model only captures up to 240 plies, so limit the input and then rescale
     m = min(240, ply) / 64.0
 
@@ -124,7 +149,6 @@ def init_df(path):
     df = pd.read_csv(
         CSV_PATH,
         converters={"moves": ast.literal_eval, "eval": try_ast_eval},
-        # errors="coherce",
     )
 
     # evals is NA if no illegal move made
@@ -137,14 +161,15 @@ def init_df(path):
     df["ply"] = df["moves"].apply(len)
 
     # Set positive numbers are better for gpt
-    df["eval_value"].loc[df["white"] == "stockfish"] *= -1
-    # df["result"].loc[df["white"] == "stockfish"] = 1 - df["result"].loc[df["white"] == "stockfish"]
-    df.loc[df["white"] == "stockfish", "result"] = 1 - df["result"].loc[df["white"] == "stockfish"]
+    not_gpt = df["white"] == "stockfish"
+    df.loc[not_gpt, "eval_value"] *= -1
+    df.loc[not_gpt, "result"] = 1 - df.loc[not_gpt, "result"]
 
-    df["gpt_cp_result"] = df.apply(lambda row: decide_game(**row), axis=1)
     # gpt_win_prob is in terms of white, but gpt_cp_result already converted to be in terms of GPT
+    df["gpt_cp_result"] = df.apply(lambda row: decide_game(**row), axis=1)
     df["gpt_win_prob"] = df.apply(lambda row: gpt_win_prob(**row), axis=1)
     df["draw_prob"] = df.apply(lambda row: draw_prob(**row), axis=1)
+    df["gpt_lose_prob"] = df.apply(lambda row: gpt_lose_prob(**row), axis=1)
 
     assert (
         df[df["result"] == 1].apply(
@@ -211,7 +236,7 @@ if __name__ == "__main__":
 
     plt.plot(
         np.arange(240),
-        [gpt_win_prob(gpt_cp_result=500 * 3, ply=i) for i in np.arange(240)],
+        [gpt_win_prob(gpt_cp_result=WIN_CUTOFF, ply=i) for i in np.arange(240)],
         label="win",
     )
     plt.plot(
@@ -227,6 +252,10 @@ if __name__ == "__main__":
     plt.legend()
     plt.ylim([0, 1])
     plt.xlim(0, 240)
+
+    df["gpt_win_prob"].hist()
+    plt.show()
+    df["draw_prob"].hist()
     # %%
 
     illegal_p = df["illegal_move"].notna().mean()
@@ -306,40 +335,24 @@ if __name__ == "__main__":
     fig.subplots_adjust(hspace=0.5)
     fig.show()
     # %%  plot length of game versus elo
-    x = df["white_elo"].values
-    y = df["ply"].values
-    sns.regplot(x=x, y=y, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
-    plt.title("Length of game versus Stockfish Elo")
-    plt.xlabel("Elo")
-    plt.ylabel("Number of moves")
-    corr, p = stats.pearsonr(x, y)
-    plt.text(
-        0.05,
-        0.95,
-        f"corr: {corr:.2f} p: {p:.2f}",
-        horizontalalignment="left",
-        verticalalignment="top",
-        transform=plt.gca().transAxes,
+    reg_plot(
+        df["white_elo"].values,
+        df["ply"].values,
+        "Elo",
+        "Ply",
+        title="Number of moves vs Stockfish Elo",
     )
-    plt.show()
-    # %% Plot Win Probability vs elo
-    x = df["white_elo"].values
-    y = df["gpt_cp_result"].values
-    sns.regplot(x=x, y=y, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
-    plt.title("Win probability vs Stockfish Elo")
-    plt.xlabel("Elo")
-    plt.ylabel("Win probability")
-    corr, p = stats.pearsonr(x, y)
-    plt.text(
-        0.05,
-        0.95,
-        f"corr: {corr:.2f} p: {p:.2f}",
-        horizontalalignment="left",
-        verticalalignment="top",
-        transform=plt.gca().transAxes,
+    reg_plot(
+        df["white_elo"].values,
+        df["gpt_win_prob"].values,
+        "Elo",
+        "GPT Win Probability",
+        "GPT Win probablity vs Stockfish Elo",
     )
-    plt.show()
 
+    print(df.groupby("white")["gpt_win_prob"].mean(), "\n")
+    print(df.groupby("white")["draw_prob"].mean(), "\n")
+    print(df.groupby("white")["gpt_lose_prob"].mean(), "\n")
     # %%
     # graph probablity that gpt wins vs elo of gpt.
     # How to convert evaluation to probability of winning?

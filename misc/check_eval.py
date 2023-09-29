@@ -11,27 +11,38 @@ if __name__ == "__main__":
     sf = Stockfish(STOCKFISH_PATH, {"threads": 4, "hash": 512})
     sf2 = Stockfish(STOCKFISH_PATH, {"threads": 4, "hash": 512})
     check_fens = {
-        "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -": "Board with Black's queen missing",
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq -": "Board with White's queen missing",
-        "rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQk -": "Board with a Black rook missing",
-        "rnbqk1nr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -": "Board with a Black bishop missing",
-        "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNK w KQkq -": "Board with a Black knight missing",
+        "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0": (
+            "Board with Black's queen missing"
+        ),
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 0": (
+            "Board with White's queen missing"
+        ),
+        "rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQk - 0 0": (
+            "Board with a Black rook missing"
+        ),
+        "rnbqk1nr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 0": (
+            "Board with a Black bishop missing"
+        ),
+        "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNK w KQkq - 0 0": (
+            "Board with a Black knight missing"
+        ),
     }
     for fen, msg in check_fens.items():
         print(chess.Board(fen))
+        assert sf.is_fen_valid(fen), f"invalid fen {fen} for {msg}"
         sf.set_fen_position(fen)
-        # e = sf.get_evaluation()
-        # assert e["type"] == "cp"
-        # cp = int(e["value"])
-        # print(
-        #    f"{msg}: centi-pawn eval {cp}, win prob: {gpt_win_prob(cp, 0)} draw prob:"
-        #    f" {draw_prob(cp,0)}\n\n"
-        # )
         sf2.set_fen_position(fen)
-        results = [engines_play(sf, sf2) for _ in range(9)]
+        e = sf.get_evaluation()
+        assert e["type"] == "cp"
+        cp = int(e["value"])
+        print(
+            f"{msg}: centi-pawn eval {cp}, win prob: {gpt_win_prob(cp, 0)} draw prob:"
+            f" {draw_prob(cp,0)}\n\n"
+        )
+        # results = [engines_play(sf, sf2) for _ in range(3)]
         print(msg)
-        print(f"White win prob: {np.mean([i.result == 1 for i in results])}")
-        print(f"White draw prob: {np.mean([i.result == 0.5 for i in results])}")
+        # print(f"White win prob: {np.mean([i.result == 1 for i in results])}")
+        # print(f"White draw prob: {np.mean([i.result == 0.5 for i in results])}")
         print("\n\n")
 # %%
 # https://www.chess.com/article/view/the-evaluation-of-material-imbalances-by-im-larry-kaufman
