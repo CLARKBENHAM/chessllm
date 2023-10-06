@@ -25,7 +25,8 @@ CSV_PATH = "results/results_2023_09_29_12_02_42_877101.csv"
 # > results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv
 # Doesn't preserve newlines correctly
 CSV_PATH = "results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv"
-# CSV_PATH = "results/d.csv"
+
+CSV_PATH = "results/results_pc_2023_10_06_11_24_21_659504.csv"
 
 
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):
@@ -349,6 +350,13 @@ if __name__ == "__main__":
         "Elo",
         "Ply",
         title="Number of moves vs Stockfish Elo",
+    )
+    reg_plot(
+        df["white_elo"].values,
+        df["gpt_win_prob"].values,
+        "Elo",
+        "GPT Wins",
+        "GPT Wins vs Stockfish Elo",
     )
     reg_plot(
         df["white_elo"].values,

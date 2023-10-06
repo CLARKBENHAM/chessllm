@@ -13,6 +13,8 @@ from operator import itemgetter
 from datetime import datetime
 import csv
 import re
+import requests
+import json
 
 import chess
 import openai
@@ -239,6 +241,9 @@ class OpenAI(APIEngine):
 
 
 class Manual(OpenAI):
+    def __init__(self, name, model):
+        super().__init__(name, model)
+
     def __str__(self):
         return super().__str__() + f" Human Playing named {self.name}"
 
@@ -255,6 +260,50 @@ class Manual(OpenAI):
             except Exception as e:
                 print(e)
                 print("Enter move: ")
+
+
+class ParrotChess(OpenAI):
+    """Playing against model https://parrotchess.com/
+    Should be black
+    """
+
+    url = "https://parrotchess.com/move"
+
+    headers = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive",
+        "Content-Type": "application/json",
+        "Origin": "https://parrotchess.com",
+        "Referer": "https://parrotchess.com/",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)"
+            " Chrome/117.0.0.0 Safari/537.36 Edg/117.0.2045.47"
+        ),
+        "sec-ch-ua": '"Microsoft Edge";v="117", "Not;A=Brand";v="8", "Chromium";v="117"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+    }
+
+    def __init__(self):
+        super().__init__("ParrotChess", "webmodel-gpt-3.5-turbo-instruct")
+
+    def get_best_move(self):
+        payload = json.dumps({"moves": self.uci_moves})
+
+        # Make the request
+        for i in range(3):
+            response = requests.post(ParrotChess.url, headers=ParrotChess.headers, data=payload)
+            try:
+                return response.json()["gptMove"]
+            except Exception as e:
+                print(e)
+                print(response)
+                time.sleep(2 + 2**i)
+        return None
 
 
 def new_elos(elo1, elo2, result, k=24):
@@ -365,7 +414,7 @@ def make_engines(sf_elo=1200, model="gpt-3.5-turbo-instruct"):
     return (sf, oa)
 
 
-def play(sf, oa):
+def play_sf_oa(sf, oa):
     sf_white = bool(random.randint(0, 1))
     white, black = (sf, oa) if sf_white else (oa, sf)
     try:
@@ -386,10 +435,17 @@ def play(sf, oa):
     return tuple(r)
 
 
-def play_threadsafe(elo, model):
+def play_sf_oa_ts(elo, model):
     # sf takes <1sec to init, but has locks to executable
     sf, oa = make_engines(elo, model)
-    return play(sf, oa)
+    return play_sf_oa(sf, oa)
+
+
+def play_sf_pc_ts(sf_elo, *vargs, **kwargs):
+    sf = Stockfish("stockfish", parameters={"Threads": 6, "Hash": 512, "UCI_Elo": sf_elo})
+    pc = ParrotChess()
+    pc.elo_est = sf_elo
+    return play_sf_oa(sf, pc)
 
 
 # sf_elo = 1200
@@ -411,23 +467,32 @@ def play_threadsafe(elo, model):
 # print(oa.get_best_move())
 
 
-sf, oa = make_engines()
-m = Manual("human", "human")
-play(sf, m)
+# sf, oa = make_engines()
+# m = Manual("human", "human")
+# pc = ParrotChess()
+# play(sf, m)
+# play(sf, pc)
 # print(play(sf, oa))
 # print(oa._make_prompt())
 
 # %%
 
 if __name__ == "__main__":
-    sf_elo = 1600
-    oa_elo = 1600
+    sf_elo = 1500
+    oa_elo = 1500
     model = "gpt-3.5-turbo-instruct"
     all_results = []
     now = re.sub("\D+", "_", str(datetime.now()))
-    NUM_CPU = 5
-    NUM_GAMES = NUM_CPU * 20
-    result_csv_path = f"results/results_{now}.csv"
+    NUM_CPU = 2
+    NUM_GAMES = NUM_CPU * 5
+
+    if False:
+        play = play_sf_pc_ts
+        result_csv_path = f"results/results_pc_{now}.csv"
+    else:
+        play_sf_oa = play_sf_oa_ts
+        result_csv_path = f"results/results_{now}.csv"
+
     print(result_csv_path)
     with open(result_csv_path, "a+", newline="") as file:
         writer = csv.writer(file)
@@ -436,7 +501,7 @@ if __name__ == "__main__":
         for _ in range(NUM_GAMES // NUM_CPU):
             results = [
                 StoreResults(*r)
-                for r in pool.starmap(play_threadsafe, [(sf_elo, model) for _ in range(NUM_CPU)])
+                for r in pool.starmap(play, [(sf_elo, model) for _ in range(NUM_CPU)])
             ]
             rs = []
             for r in results:
@@ -464,7 +529,7 @@ if __name__ == "__main__":
             print([(i.white, i.result, i.eval) for i in results], rs)
             # oa_elo, sf_elo = new_elos(oa_elo, sf_elo, rs, k=50)
             print(results, "\n", rs, oa_elo, sf_elo)
-            oa_elo += 50
+            oa_elo += 150
             sf_elo = oa_elo
     print(all_results)
     print([(i.result, i.black_elo, i.eval) for i in all_results])
