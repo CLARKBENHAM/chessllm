@@ -26,7 +26,8 @@ CSV_PATH = "results/results_2023_09_29_12_02_42_877101.csv"
 # Doesn't preserve newlines correctly
 CSV_PATH = "results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv"
 
-CSV_PATH = "results/results_pc_2023_10_06_11_24_21_659504.csv"
+CSV_PATH = "results/results_pc_2023_10_06_11_24_21_659504.csv"  # parrotchess elo > 1800
+CSV_PATH = "results/results_2023_10_06_12_08_14_112166.csv"
 
 
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):

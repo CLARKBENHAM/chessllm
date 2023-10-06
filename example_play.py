@@ -136,8 +136,8 @@ class OpenAI(APIEngine):
 [WhiteFideId ""1503014""]
 [BlackElo ""2812""]
 [BlackTitle ""GM""]
-[BlackFideId""4168119""]
-[TimeControl40/7200:20/3600:900+30""]
+[BlackFideId ""4168119""]
+[TimeControl ""40/7200:20/3600:900+30""]
 [UTCDate ""2024.11.27""]
 [UTCTime ""09:01:25""]
 [Variant ""Standard""]\n"""
@@ -150,9 +150,9 @@ class OpenAI(APIEngine):
                 )
             ]
         )
-
         if len(self.san_moves) % 2 == 0:
-            prompt += f"\n{len(self.san_moves)//2+1}. " if len(self.san_moves) > 0 else "1. "
+            prompt += f"\n{len(self.san_moves)//2+1}. " if len(self.san_moves) > 0 else "\n1. "
+
         return prompt
 
     def get_best_move(self):
@@ -478,19 +478,19 @@ def play_sf_pc_ts(sf_elo, *vargs, **kwargs):
 # %%
 
 if __name__ == "__main__":
-    sf_elo = 1500
-    oa_elo = 1500
+    sf_elo = 1400
+    oa_elo = 1400
     model = "gpt-3.5-turbo-instruct"
     all_results = []
     now = re.sub("\D+", "_", str(datetime.now()))
-    NUM_CPU = 2
-    NUM_GAMES = NUM_CPU * 5
+    NUM_CPU = 3
+    NUM_GAMES = NUM_CPU * 3
 
     if False:
         play = play_sf_pc_ts
         result_csv_path = f"results/results_pc_{now}.csv"
     else:
-        play_sf_oa = play_sf_oa_ts
+        play = play_sf_oa_ts
         result_csv_path = f"results/results_{now}.csv"
 
     print(result_csv_path)
@@ -529,7 +529,7 @@ if __name__ == "__main__":
             print([(i.white, i.result, i.eval) for i in results], rs)
             # oa_elo, sf_elo = new_elos(oa_elo, sf_elo, rs, k=50)
             print(results, "\n", rs, oa_elo, sf_elo)
-            oa_elo += 150
+            oa_elo += 200
             sf_elo = oa_elo
     print(all_results)
     print([(i.result, i.black_elo, i.eval) for i in all_results])
