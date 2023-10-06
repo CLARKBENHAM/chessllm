@@ -16,42 +16,16 @@ import ast
 from constants import STOCKFISH_PATH, WIN_CUTOFF, WIN_CP, NormalizeToPawnValue
 
 
-def try_ast_eval(s):
-    try:
-        return ast.literal_eval(s)
-    except:
-        return pd.NA
-
-
 # trend towards AI playing better against better models
-CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"  # no trend
+# CSV_PATH = "results/results_2023_09_22_17_47_34_587661.csv"  # no trend
 # CSV_PATH = "results/results_2023_09_22_18_01_40_144335.csv"
 
-
-def reg_plot(
-    x1,
-    y1,
-    xlabel,
-    ylabel,
-    title=None,
-):
-    if title is None:
-        title = f"{ylabel} vs {xlabel}"
-
-    sns.regplot(x=x1, y=y1, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
-    plt.title(title)
-    plt.ylabel(ylabel)
-    plt.xlabel(xlabel)
-    corr, p = stats.pearsonr(x1, y1)
-    plt.text(
-        0.05,
-        0.95,
-        f"corr: {corr:.2f} p: {p:.2f}",
-        horizontalalignment="left",
-        verticalalignment="top",
-        transform=plt.gca().transAxes,
-    )
-    plt.show()
+CSV_PATH = "results/results_2023_09_29_12_02_42_877101.csv"
+# awk '{if (NR == 1) { print $0 }; if ( FNR > 1) { print $0};} ' results/results_2023_09_2*
+# > results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv
+# Doesn't preserve newlines correctly
+CSV_PATH = "results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv"
+# CSV_PATH = "results/d.csv"
 
 
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):
@@ -145,10 +119,19 @@ def draw_prob(gpt_cp_result, ply, **kwargs):
     return 1 - w_p - l_p
 
 
+def try_ast_eval(s):
+    try:
+        return ast.literal_eval(s)
+    except Exception as e:
+        if s is not None and s:
+            print(f"failed to parse {s} with {e}")
+        return pd.NA
+
+
 def init_df(path):
     df = pd.read_csv(
-        CSV_PATH,
-        converters={"moves": ast.literal_eval, "eval": try_ast_eval},
+        path,
+        converters={"moves": try_ast_eval, "eval": try_ast_eval},  # moves must be defined
     )
 
     # evals is NA if no illegal move made
@@ -190,7 +173,7 @@ def init_df(path):
         )
         .all()
     )
-    ## Fails because with a very good stockfish, even a slight edge is a win, but I require 300 pawns worth of advantage
+    # # Fails because with a very good stockfish, even a slight edge is a win, but I require 300 pawns worth of advantage
     # assert df.query("gpt_win_prob>0.99").apply(
     #        lambda r: (~r.isna()["illegal_move"] and r["gpt_cp_result"] >= WIN_CUTOFF)
     #        or r["result"] == 1,
@@ -214,9 +197,34 @@ def init_df(path):
     return df
 
 
+def reg_plot(
+    x1,
+    y1,
+    xlabel,
+    ylabel,
+    title=None,
+):
+    if title is None:
+        title = f"{ylabel} vs {xlabel}"
+
+    sns.regplot(x=x1, y=y1, scatter=True, ci=95, line_kws={"color": "red"}, scatter_kws={"s": 2})
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xlabel(xlabel)
+    corr, p = stats.pearsonr(x1, y1)
+    plt.text(
+        0.05,
+        0.95,
+        f"corr: {corr:.2f} p: {p:.2f}",
+        horizontalalignment="left",
+        verticalalignment="top",
+        transform=plt.gca().transAxes,
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
     df = init_df(CSV_PATH)
-
     # df[df["result"] == 1][["gpt_win_prob", "gpt_cp_result"]]
     # %%
 
@@ -353,9 +361,6 @@ if __name__ == "__main__":
     print(df.groupby("white")["gpt_win_prob"].mean(), "\n")
     print(df.groupby("white")["draw_prob"].mean(), "\n")
     print(df.groupby("white")["gpt_lose_prob"].mean(), "\n")
-    # %%
-    # graph probablity that gpt wins vs elo of gpt.
-    # How to convert evaluation to probability of winning?
 
     # %% For each entry in the df parse the moves column, a list of moves and return the stockfish evaluation of the board for that move. The result should be a series of lists
     # Very Slow
