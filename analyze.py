@@ -26,8 +26,10 @@ CSV_PATH = "results/results_2023_09_29_12_02_42_877101.csv"
 # Doesn't preserve newlines correctly
 CSV_PATH = "results/all_concat_results_no_prompt_col_2023_09_29_13_10.csv"
 
-CSV_PATH = "results/results_pc_2023_10_06_11_24_21_659504.csv"  # parrotchess elo > 1800
-CSV_PATH = "results/results_2023_10_06_12_08_14_112166.csv"
+CSV_PATH = "results/results_pc_2023_10_06_11_24_21_659504.csv"  # parrotchess elo > 1800 24/25 wins
+CSV_PATH = "results/results_2023_10_06_12_42_45_718101.csv"  # can do okay locally, 6/9 wins 2 draws
+CSV_PATH = "results/results_2023_10_06_13_15_46_532583.csv"  # added back stopwords, temp 0.2
+CSV_PATh = "results/results_2023_10_06_13_29_17_045505.csv"  # diff temp, much worse 0.5
 
 
 def decide_game(white=None, result=None, moves=None, eval_type=None, eval_value=None, **kwargs):
@@ -262,10 +264,17 @@ if __name__ == "__main__":
     plt.legend()
     plt.ylim([0, 1])
     plt.xlim(0, 240)
-
-    df["gpt_win_prob"].hist()
     plt.show()
+
+    plt.title("gpt win prob hist")
+    df["gpt_win_prob"].hist()
+    plt.ylabel("numberof games")
+    plt.xlabel("win prob")
+    plt.show()
+    plt.title("draw prob hist ")
     df["draw_prob"].hist()
+    plt.ylabel("number of games")
+    plt.xlabel("draw prob")
     # %%
 
     illegal_p = df["illegal_move"].notna().mean()

@@ -152,8 +152,32 @@ class OpenAI(APIEngine):
         )
         if len(self.san_moves) % 2 == 0:
             prompt += f"\n{len(self.san_moves)//2+1}. " if len(self.san_moves) > 0 else "\n1. "
+        # Parrot chess
+        pgn = """[Event "FIDE World Championship Match 2024"]
+[Site "Los Angeles, USA"]
+[Date "2024.12.01"]
+[Round "5"]
+[White "Carlsen, Magnus"]
+[Black "Nepomniachtchi, Ian"]
+[Result "1-0"]
+[WhiteElo "2885"]
+[WhiteTitle "GM"]
+[WhiteFideId "1503014"]
+[BlackElo "2812"]
+[BlackTitle "GM"]
+[BlackFideId "4168119"]
+[TimeControl "40/7200:20/3600:900+30"]
+[UTCDate "2024.11.27"]
+[UTCTime "09:01:25"]
+[Variant "Standard"]
 
-        return prompt
+1."""
+
+        for n, m in enumerate(self.san_moves):
+            if n % 2 == 0 and n > 0:
+                pgn += f" {n//2+1}."
+            pgn += f" {m}"
+        return pgn
 
     def get_best_move(self):
         prompt = self._make_prompt()
@@ -166,7 +190,7 @@ class OpenAI(APIEngine):
                 response = openai.Completion.create(
                     model=self.model,
                     prompt=prompt,
-                    temperature=min(0.8 + (i / 8), 2),
+                    temperature = min(0.1 + (i / 8), 2) #, min(0.8 + (i / 8), 2),
                     max_tokens=6,  # longest san moves are 6 tokens: dxe8=R#
                     stop=[
                         ".",
@@ -185,7 +209,6 @@ class OpenAI(APIEngine):
             texts = list(
                 set(dict.fromkeys(map(itemgetter("text"), response.choices)))
             )  # Dict's perserve order in py>=3.7
-            # print(f"OA responses: {texts}")
             for text in texts:
                 san_move = text.strip().split(" ")[0].split("\n")[0].strip()
                 try:
@@ -467,7 +490,7 @@ def play_sf_pc_ts(sf_elo, *vargs, **kwargs):
 # print(oa.get_best_move())
 
 
-# sf, oa = make_engines()
+sf, oa = make_engines()
 # m = Manual("human", "human")
 # pc = ParrotChess()
 # play(sf, m)
@@ -475,6 +498,19 @@ def play_sf_pc_ts(sf_elo, *vargs, **kwargs):
 # print(play(sf, oa))
 # print(oa._make_prompt())
 
+oa.set_position(
+    [
+        "e2e4",
+        "e7e5",
+        "g1f3",
+        "b8c6",
+        "f1c4",
+        "g8f6",
+        "d2d3",
+        "f8c5",
+    ]
+)
+print(oa._make_prompt())
 # %%
 
 if __name__ == "__main__":
@@ -486,10 +522,10 @@ if __name__ == "__main__":
     NUM_CPU = 3
     NUM_GAMES = NUM_CPU * 3
 
-    if False:
+    if False:  # parrot chess
         play = play_sf_pc_ts
         result_csv_path = f"results/results_pc_{now}.csv"
-    else:
+    else:  # local gpt
         play = play_sf_oa_ts
         result_csv_path = f"results/results_{now}.csv"
 
@@ -532,6 +568,6 @@ if __name__ == "__main__":
             oa_elo += 200
             sf_elo = oa_elo
     print(all_results)
-    print([(i.result, i.black_elo, i.eval) for i in all_results])
+    print([(i.result, i.black_elo, i.eval, i.white) for i in all_results])
     print("\n\nwrote: ", result_csv_path)
 # %%
