@@ -1,4 +1,4 @@
 {
-  "jupyter.notebookFileRoot": "${workspaceFolder}"
-
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "python.defaultInterpreterPath": "/Users/clarkbenham/miniconda3/envs/chess/bin/python"
 }
